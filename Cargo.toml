@@ -1,0 +1,15 @@
+[package]
+name = "plane_analyzer_ros"
+version = "0.1.0"
+authors = ["yukimakura <yukimakura86@gmail.com>"]
+edition = "2018"
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serialport = "3.3.0"
+clap = "2.32"
+csv_import_general = { git = "https://github.com/yukimakura/csv_import_general.git", branch = "master" }
+gnuplot = "0.0.33"
+rosrust = "0.9"
