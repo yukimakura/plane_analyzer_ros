@@ -1,9 +1,9 @@
 extern crate clap;
 extern crate serialport;
 extern crate csv_import_general;
-#[macro_use]
 extern crate rosrust;
 
+use rosrust::api::raii::{Publisher};
 use csv_import_general::csv_parse;
 
 use std::io::{self, Write};
@@ -12,7 +12,7 @@ use std::time::Duration;
 use clap::{App, AppSettings, Arg};
 use serialport::prelude::*;
 
-mod msg {
+mod f_msg {
     rosrust::rosmsg_include!(std_msgs/Float64);
 }
 
@@ -32,8 +32,22 @@ fn normal_dist_calc(data :f64,ave : f64, sigma2 :f64) -> f64{
 
 }
 
-fn sensordata_filter(data:f64,sensor_data_buffer :f64,filter_param : f64) -> f64{
-    (filter_param * sensor_data_buffer + (1.0 - filter_param) * data)
+fn sensordata_filter(
+    p_pub : &Publisher<f_msg::std_msgs::Float64>,
+    sensor_filter_pub : &Publisher<f_msg::std_msgs::Float64>,
+    data:f64,
+    sensor_data_buffer :f64,
+    filter_param : f64,
+    ave:f64,
+    sigma2:f64) -> f64{
+    let buffer = (filter_param * sensor_data_buffer + (1.0 - filter_param) * data);
+    let mut p_msgdata = f_msg::std_msgs::Float64::default();
+    let mut sensor_msgdata = f_msg::std_msgs::Float64::default();
+    sensor_msgdata.data = buffer;
+    p_msgdata.data = (normal_dist_calc(buffer,ave,sigma2)/normal_dist_calc(ave,ave,sigma2))*100.0;
+    p_pub.send(p_msgdata).unwrap();
+    sensor_filter_pub.send(sensor_msgdata).unwrap();
+    buffer
     
 }
 
@@ -44,11 +58,11 @@ fn main() {
     let variance_param = rosrust::param(&format!("/{}/variance",nodename).to_string()).unwrap();
     let average_param = rosrust::param(&format!("/{}/average",nodename).to_string()).unwrap();
     let plane_probs_pub = rosrust::publish("plane_probability", 10).unwrap();
+    let sensor_filter_pub = rosrust::publish("sensor_filter", 10).unwrap();
     
 
     //read args
-    let matches = App::new("Serialport Example - Receive Data")
-        .about("Reads data from a serial port and echoes it to stdout")
+    let matches = App::new("plane_analyzer_node")
         .setting(AppSettings::DisableVersion)
         .arg(
             Arg::with_name("port")
@@ -108,18 +122,15 @@ fn main() {
     match serialport::open_with_settings(&port_name, &settings) {
         Ok(mut port) => {
             let mut serial_buf: Vec<u8> = vec![0; 1000];
-            println!("Receiving data on {} at {} baud:", &port_name, &baud_rate);
+            println!("Receiving dsensor_data_bufferata on {} at {} baud:", &port_name, &baud_rate);
             while rosrust::is_ok() {
-                let mut msg = msg::std_msgs::Float64::default();
+                
                 match port.read(serial_buf.as_mut_slice()) {
                     // Ok(t) => io::stdout().write_all(&serial_buf[..t]).unwrap(),//receive
-                    Ok(t) => sensor_data_buffer = sensordata_filter(String::from_utf8((&serial_buf[..t-2]).to_vec()).unwrap().parse::<f64>().unwrap(),sensor_data_buffer,filter_parameter.parse::<f64>().unwrap()),
+                    Ok(t) => sensor_data_buffer =  sensordata_filter(&plane_probs_pub,&sensor_filter_pub,String::from_utf8((&serial_buf[..t-2]).to_vec()).unwrap().parse::<f64>().unwrap(),sensor_data_buffer,filter_parameter.parse::<f64>().unwrap(),ave,sigma2),
                     Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
                     Err(e) => eprintln!("{:?}", e),
                 }
-
-                msg.data = (normal_dist_calc(sensor_data_buffer,ave,sigma2)/normal_dist_calc(ave,ave,sigma2))*100.0;
-                plane_probs_pub.send(msg).unwrap();
 
             }
         }
